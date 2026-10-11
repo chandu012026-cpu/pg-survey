@@ -60,3 +60,6 @@ input:focus,textarea:focus,.opt:focus-visible,.pill:focus-visible,.star:focus-vi
 ul.tight{padding-left:20px} ul.tight li{margin:4px 0}
 .opt.rank[aria-pressed="true"] .mk::after{content:none}
 .btnlink{display:block;text-align:center;font:700 16px var(--body);padding:14px 18px;border-radius:12px;background:var(--accent);color:#fff;text-decoration:none}
+.codebox{margin:16px 0 8px;padding:14px 16px;border:2px dashed var(--accent);border-radius:14px;text-align:center;background:var(--surface)}
+.codebox span{display:block;color:var(--muted);font-size:13px;font-weight:600}
+.codebox b{display:block;font:700 34px/1.25 var(--body);letter-spacing:.14em}

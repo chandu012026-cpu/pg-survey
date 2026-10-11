@@ -1,5 +1,5 @@
 // Survey results — for the admin only. Log in with the admin mobile number; the database shows the answers,
-// contacts and payouts only to the admin (part 11 rules), so this page shows nothing to anyone else.
+// and contacts only to the admin (part 11 rules), so this page shows nothing to anyone else.
 (function () {
   'use strict';
   const D = window.SURVEY, CFG = window.SURVEY_CONFIG;
@@ -22,10 +22,12 @@
   const flat = who => D[who].sections.reduce((out, sec) => out.concat(sec.qs.map(q => Object.assign({ sec }, q))), []);
   const allItems = q => ((typeof q.items === 'function' ? q.items('full') : q.items) || []).map(x => (typeof x === 'string' ? x : x.t));
   const LENGTH = { core: 'Quick', full: 'Detailed' };
-  const PAY = D.resident.payout || 25;
-  const CONTACT_COLS = 'id,response_id,survey,phone,gmail,wants_testing,wants_call,wants_draw,wants_pilot,note,payout,wants_payment,paid_at,created_at';
+  const REWARD = D.resident.reward || 25;
+  const CONTACT_COLS = '*';
+  // the completion code people see when they finish: the first 6 characters of their survey's id
+  const codeOf = id => String(id || '').replace(/-/g, '').slice(0, 6).toUpperCase();
 
-  let rows = [], contacts = [], note = '', confirmDelete = false, showPaid = false;
+  let rows = [], contacts = [], note = '', confirmDelete = false;
   const F = { who: 'resident', version: 'all', channel: 'all', days: 'all' };
   const open = new Set();   // text questions showing every answer
 
@@ -119,13 +121,14 @@
       <div class="row"><button type="button" id="csv"${R.length ? '' : ' disabled'}>Download these answers (CSV)</button></div>`;
     const week = R.filter(r => Date.now() - Date.parse(r.created_at) <= 7 * 864e5).length;
     const mins = median(R.map(r => r.seconds_taken).filter(x => typeof x === 'number'));
-    const unpaid = contacts.filter(c => c.wants_payment && !c.paid_at).length;
+    const todayIST = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }), day = d => todayIST.format(new Date(d));
+    const doneToday = R.filter(r => day(r.created_at) === day(Date.now())).length;
     h += `<div class="tiles">
       <div class="tile"><div class="l">Responses</div><div class="v" id="t_total">${fmt(R.length)}</div><div class="s">${F.who === 'owner' ? `${R.filter(r => r.version === 'core').length} quick · ${R.filter(r => r.version === 'full').length} detailed` : 'complete surveys'}</div></div>
       <div class="tile"><div class="l">In the last 7 days</div><div class="v">${fmt(week)}</div></div>
       <div class="tile"><div class="l">Typical time taken</div><div class="v">${mins == null ? '—' : Math.max(1, Math.round(mins / 60)) + ' min'}</div><div class="s">middle answer</div></div>
       ${F.who === 'resident'
-        ? `<div class="tile"><div class="l">Still to pay</div><div class="v" id="t_topay">₹${fmt(unpaid * PAY)}</div><div class="s">${unpaid} ${unpaid === 1 ? 'person' : 'people'} · <a href="#payouts">see the list</a></div></div>`
+        ? `<div class="tile"><div class="l">Completed today</div><div class="v" id="t_today">${fmt(doneToday)}</div><div class="s"><a href="#codes">check a code</a></div></div>`
         : `<div class="tile"><div class="l">Interviews</div><div class="v">${fmt(R.filter(r => r.source === 'interview').length)}</div><div class="s">filled in by you</div></div>`}
       </div>`;
     if (older) h += `<p class="muted" id="oldnote">${older} ${older === 1 ? 'answer' : 'answers'} from an earlier version of the questions ${older === 1 ? 'is' : 'are'} not shown here.</p>`;
@@ -135,7 +138,7 @@
       sec.qs.forEach(q => { if (!q.consent) h += card(Object.assign({ sec }, q), R); });
       h += '</section>';
     });
-    if (F.who === 'resident') h += payoutsCard();
+    if (F.who === 'resident') h += codeCard();
     h += contactsCard();
     app.innerHTML = h;
   }
@@ -253,38 +256,31 @@
       barList(list.slice(0, 15), n) + (list.length > 15 ? `<p class="others">And ${list.length - 15} more in the download.</p>` : '');
   }
 
-  function payoutsCard() {
-    const byResp = new Map(rows.map(r => [r.id, r]));
-    const all = contacts.filter(c => c.wants_payment);
-    const unpaid = all.filter(c => !c.paid_at), paid = all.filter(c => c.paid_at);
-    // waiting first (oldest first, so people are paid in order), then paid (latest first)
-    const list = (showPaid ? all : unpaid).slice().sort((a, b) =>
-      (a.paid_at ? 1 : 0) - (b.paid_at ? 1 : 0) || (a.paid_at ? Date.parse(b.paid_at) - Date.parse(a.paid_at) : Date.parse(a.created_at) - Date.parse(b.created_at)));
-    let h = `<section class="sec" id="payouts"><h2>₹${PAY} payouts</h2><div class="qcard">
-      <p id="pay_sum"><b>To pay: ${unpaid.length} ${unpaid.length === 1 ? 'person' : 'people'} · ₹${fmt(unpaid.length * PAY)}</b> · Paid so far: ${paid.length} · ₹${fmt(paid.length * PAY)}</p>
-      <p class="sub">Send ₹${PAY} from your UPI app, then tap “Mark paid”. “Fast” means the survey took under 2 minutes; check those answers before paying.</p>
-      <div class="row" style="margin-bottom:10px"><button type="button" id="paycsv"${unpaid.length ? '' : ' disabled'}>Download the to-pay list (CSV)</button>
-      <label style="display:flex;flex-direction:row;align-items:center;gap:6px;font-size:14px"><input type="checkbox" id="showpaid" style="width:auto"${showPaid ? ' checked' : ''}> Show paid too</label></div>`;
-    if (!list.length) h += `<p class="muted" id="pay_none">${all.length ? 'Everyone has been paid.' : 'No one has asked for a payout yet.'}</p>`;
-    else h += '<div class="tbl"><table><thead><tr><th>Sent</th><th>UPI ID or number</th><th>Hostel</th><th>Time taken</th><th></th></tr></thead><tbody>' + list.map(c => {
-      const r = byResp.get(c.response_id) || {}, secs = r.seconds_taken, fast = typeof secs === 'number' && secs < 120;
-      const hostel = r.answers && r.answers.Q4 ? r.answers.Q4 : '—';
-      return `<tr data-payrow="${esc(c.id)}"><td class="n">${esc(when(c.created_at))}</td><td><b>${esc(c.payout)}</b></td><td>${esc(hostel)}</td>` +
-        `<td class="n">${secs == null ? '—' : Math.max(1, Math.round(secs / 60)) + ' min'}${fast ? ' <span class="flag">Fast</span>' : ''}</td>` +
-        `<td>${c.paid_at ? `<span class="paid">Paid ${esc(istDay.format(new Date(c.paid_at)))}</span> <button type="button" class="linkbtn" data-unpay="${esc(c.id)}">Undo</button>` : `<button type="button" class="pay" data-pay="${esc(c.id)}">Mark paid</button>`}</td></tr>`;
-    }).join('') + '</tbody></table></div>';
-    return h + '<div class="err" id="payerr"></div></div></section>';
+  function codeCard() {
+    return `<section class="sec" id="codes"><h2>Check a completion code</h2><div class="qcard">
+      <p class="sub" style="margin-top:0">Everyone who finishes sees a 6-character completion code. Check it here before paying their ₹${REWARD}.</p>
+      <form id="codeCheck" class="row" novalidate><input id="ccode" maxlength="6" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="e.g. 3F9A1C" aria-label="Completion code" style="max-width:190px;text-transform:uppercase;letter-spacing:.1em"><button type="submit">Check</button></form>
+      <div id="ccresult" style="margin-top:10px"></div></div></section>`;
+  }
+  function checkCode() {
+    const code = $('ccode').value.replace(/[^0-9a-f]/gi, '').toUpperCase(), out = $('ccresult');
+    if (code.length !== 6) { out.innerHTML = '<p class="err">Type the 6-character code.</p>'; return; }
+    const r = rows.find(x => codeOf(x.id) === code);
+    if (!r) { out.innerHTML = `<p class="err" id="ccbad">No survey has the code ${esc(code)}. If it was sent just now, tap Refresh and check again.</p>`; return; }
+    const s = r.seconds_taken, fast = typeof s === 'number' && s < 120, hostel = r.answers && r.answers.Q4;
+    out.innerHTML = `<p class="ok" id="ccok">Valid code: a complete ${esc(r.survey)} survey, sent ${esc(when(r.created_at))}${hostel ? ' · ' + esc(hostel) : ''} · took ${s == null ? '—' : Math.max(1, Math.round(s / 60)) + ' min'}.</p>` +
+      (fast ? '<p class="err" id="ccfast">It was finished in under 2 minutes. Look at the answers before paying.</p>' : '');
   }
 
   function contactsCard() {
-    const C = contacts, by = k => C.filter(c => c[k]).length, unpaid = C.filter(c => c.wants_payment && !c.paid_at).length;
+    const C = contacts, by = k => C.filter(c => c[k]).length;
     let h = `<section class="sec"><h2>Contact details</h2><div class="qcard danger-zone" id="contacts">
-      <p id="c_count">${C.length} ${C.length === 1 ? 'person' : 'people'} left contact details: ${by('wants_payment')} UPI IDs or numbers for the ₹${PAY}, ${by('wants_testing')} to test the app, ${by('wants_pilot')} for the owner pilot, ${by('wants_call')} for a follow-up call.</p>
-      <p class="sub">These are for all surveys, whatever the filters above. The survey promised to delete them after paying and when the research ends.</p>`;
+      <p id="c_count">${C.length} ${C.length === 1 ? 'person' : 'people'} left contact details: ${by('wants_testing')} to test the app, ${by('wants_pilot')} for the owner pilot, ${by('wants_call')} for a follow-up call.</p>
+      <p class="sub">These are for all surveys, whatever the filters above. The survey promised to delete them when the research ends.</p>`;
     if (note) h += `<p class="ok" id="c_note">${esc(note)}</p>`;
     h += `<div class="stack"><button type="button" id="ccsv"${C.length ? '' : ' disabled'}>Download contacts (CSV)</button>`;
     h += confirmDelete
-      ? `<p style="margin:6px 0 0"><b>Delete all ${C.length} contact details? This can't be undone. The answers stay.</b>${unpaid ? ` <span class="err" style="display:block">${unpaid} ${unpaid === 1 ? 'person has' : 'people have'} not been paid yet. Their UPI details will be deleted too.</span>` : ''}</p>
+      ? `<p style="margin:6px 0 0"><b>Delete all ${C.length} contact details? This can't be undone. The answers stay.</b></p>
          <button type="button" class="danger" id="cdelyes">Yes, delete them all</button><button type="button" class="ghost" id="cdelno">Cancel</button>`
       : `<button type="button" class="danger" id="cdel"${C.length ? '' : ' disabled'}>Delete all contact details</button>`;
     return h + '</div><div class="err" id="cerr"></div></div></section>';
@@ -311,31 +307,15 @@
       if (q.t === 'grid') allItems(q).forEach(it => cols.push({ h: `${q.id} · ${q.q} · ${it}`, get: a => a[q.id] && a[q.id][it] }));
       else cols.push({ h: `${q.id} · ${q.q}`, get: a => a[q.id] });
     });
-    const head = ['Response id', 'Survey', 'Length', 'Source', 'Channel', 'Sent (India time)', 'Minutes taken', 'Questions version'].concat(cols.map(c => c.h));
-    const lines = [head].concat(filtered().map(r => [r.id, r.survey, LENGTH[r.version] || r.version, r.source, r.channel || '', when(r.created_at),
+    const head = ['Response id', 'Completion code', 'Survey', 'Length', 'Source', 'Channel', 'Sent (India time)', 'Minutes taken', 'Questions version'].concat(cols.map(c => c.h));
+    const lines = [head].concat(filtered().map(r => [r.id, codeOf(r.id), r.survey, LENGTH[r.version] || r.version, r.source, r.channel || '', when(r.created_at),
       r.seconds_taken == null ? '' : Math.round(r.seconds_taken / 60), r.questions_version].concat(cols.map(c => c.get(r.answers || {})))));
     download(`survey-${F.who}s-${today()}.csv`, lines);
   }
   function contactsCsv() {
     const yn = b => (b ? 'yes' : '');
-    download(`survey-contacts-${today()}.csv`, [['Response id', 'Survey', 'UPI ID or number (payout)', 'Paid on', 'Phone', 'Gmail', 'Test the app', 'Follow-up call', 'Lucky draw', 'Owner pilot', 'Other owners to talk to', 'Sent (India time)']]
-      .concat(contacts.map(c => [c.response_id, c.survey, c.payout, c.paid_at ? when(c.paid_at) : '', c.phone, c.gmail, yn(c.wants_testing), yn(c.wants_call), yn(c.wants_draw), yn(c.wants_pilot), c.note, when(c.created_at)])));
-  }
-  function payoutsCsv() {
-    const byResp = new Map(rows.map(r => [r.id, r]));
-    const list = contacts.filter(c => c.wants_payment && !c.paid_at).sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
-    download(`survey-payouts-to-make-${today()}.csv`, [['UPI ID or number', 'Amount (₹)', 'Sent (India time)', 'Hostel', 'Minutes taken', 'Under 2 minutes', 'Response id']]
-      .concat(list.map(c => { const r = byResp.get(c.response_id) || {}; const s = r.seconds_taken;
-        return [c.payout, PAY, when(c.created_at), r.answers && r.answers.Q4, s == null ? '' : Math.round(s / 60), typeof s === 'number' && s < 120 ? 'yes' : '', c.response_id]; })));
-  }
-  async function markPaid(id, paid, b) {
-    b.disabled = true;
-    const { data, error } = await sb.rpc('survey_mark_paid', { p_id: id, p_paid: paid });
-    if (error) { $('payerr').textContent = plain(error); b.disabled = false; return; }
-    const c = contacts.find(x => x.id === id); if (c) c.paid_at = data;
-    render();
-    const row = document.querySelector(`[data-payrow="${id}"]`) || $('payouts');
-    if (row) row.scrollIntoView({ block: 'nearest' });
+    download(`survey-contacts-${today()}.csv`, [['Response id', 'Survey', 'Phone', 'Gmail', 'Test the app', 'Follow-up call', 'Lucky draw', 'Owner pilot', 'Other owners to talk to', 'Sent (India time)']]
+      .concat(contacts.map(c => [c.response_id, c.survey, c.phone, c.gmail, yn(c.wants_testing), yn(c.wants_call), yn(c.wants_draw), yn(c.wants_pilot), c.note, when(c.created_at)])));
   }
   async function clearContacts() {
     const b = $('cdelyes'); b.disabled = true; b.textContent = 'Deleting…';
@@ -351,21 +331,19 @@
     const b = e.target.closest('button'); if (!b || b.disabled || !app.contains(b)) return;
     if (b.dataset.who) { F.who = b.dataset.who; render(); }
     else if (b.dataset.more) { if (open.has(b.dataset.more)) open.delete(b.dataset.more); else open.add(b.dataset.more); render(); }
-    else if (b.dataset.pay) markPaid(b.dataset.pay, true, b);
-    else if (b.dataset.unpay) markPaid(b.dataset.unpay, false, b);
     else if (b.id === 'refresh') { note = ''; load(); }
     else if (b.id === 'lo') logout();
     else if (b.id === 'csv') answersCsv();
-    else if (b.id === 'paycsv') payoutsCsv();
     else if (b.id === 'ccsv') contactsCsv();
     else if (b.id === 'cdel') { confirmDelete = true; note = ''; render(); }
     else if (b.id === 'cdelno') { confirmDelete = false; render(); }
     else if (b.id === 'cdelyes') clearContacts();
   });
+  app.addEventListener('submit', e => { if (e.target.id === 'codeCheck') { e.preventDefault(); checkCode(); } });
   app.addEventListener('change', e => {
     const t = e.target;
     if (t.id === 'f_days') F.days = t.value; else if (t.id === 'f_version') F.version = t.value; else if (t.id === 'f_channel') F.channel = t.value;
-    else if (t.id === 'showpaid') showPaid = t.checked; else return;
+    else return;
     render();
   });
   function showTip(li, x, y) {

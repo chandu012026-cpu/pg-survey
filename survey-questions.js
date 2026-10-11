@@ -1,6 +1,6 @@
 // Hostel & PG survey questions, version 2.
 // Residents (the default link): exactly 25 questions, Q1–Q25, and every one needs an answer, because
-// participants are paid ₹25 for a complete survey. Owners (?for=owner): the longer owner survey, B1–B13.
+// participants are paid ₹25 (directly, by UPI) for a complete survey. Owners (?for=owner): the longer owner survey, B1–B13.
 // To change a question, edit its text or options here. If a question's meaning changes, raise `version`
 // at the bottom so old and new answers stay apart.
 //
@@ -248,7 +248,7 @@
 
   window.SURVEY = {
     version: 2,
-    resident: { title: 'Hostel & PG stay survey', minutes: { core: 5 }, required: true, payout: 25, sections: resident },
+    resident: { title: 'Hostel & PG stay survey', minutes: { core: 5 }, required: true, reward: 25, sections: resident },
     owner: { title: 'PG owner survey', minutes: { core: 20, full: 45 }, sections: owner }
   };
 })();

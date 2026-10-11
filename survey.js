@@ -21,8 +21,7 @@
   const channel = (P.get('ch') || '').replace(/[^A-Za-z0-9 _.-]/g, '').slice(0, 40);
   const WHO = P.get('for') === 'owner' ? 'owner' : 'resident';
   const MODE = WHO === 'owner' && P.get('full') === '1' ? 'full' : 'core';
-  const UPI = /^[a-z0-9._-]{1,64}@[a-z][a-z0-9]{1,63}$/i, MOBILE = /^(\+?91|0)?[6-9]\d{9}$/;
-  const contactLine = () => (CFG.contact ? `<p class="muted" style="font-size:14px">Questions about the survey${D[WHO].payout ? ' or your payment' : ''}? ${esc(CFG.contact)}</p>` : '');
+  const contactLine = () => (CFG.contact ? `<p class="muted" style="font-size:14px">Questions about the survey${D[WHO].reward ? ' or your payment' : ''}? ${esc(CFG.contact)}</p>` : '');
   let S = null, flat = [], screen = '', timer = 0, sb = null;
 
   const client = () => sb || (sb = window.supabase.createClient(CFG.url, CFG.key, { auth: { persistSession: false } }));
@@ -258,9 +257,11 @@
 
   // ---- screens
   function start() {
-    if (WHO === 'resident' && source !== 'interview' && LS.get(DONE(WHO))) {
+    const done = WHO === 'resident' && source !== 'interview' ? LS.get(DONE(WHO)) : null;
+    if (done) {
       screen = 'already'; prog.hidden = true; nav.hidden = true;
-      app.innerHTML = '<h1>Thank you!</h1><p id="already">You have already completed this survey on this phone.</p>' + contactLine();
+      app.innerHTML = '<h1>Thank you!</h1><p id="already">You have already completed this survey on this phone.</p>' +
+        (done.code ? codeBox(done.code, 'Your completion code') : '') + contactLine();
       return;
     }
     const saved = LS.get(KEY(WHO));
@@ -287,7 +288,7 @@
   function renderConsent() {
     clearTimeout(timer);
     screen = 'consent'; prog.hidden = true; nav.hidden = true;
-    const info = D[S.who], m = info.minutes[S.mode], n = visList().length, pay = info.payout;
+    const info = D[S.who], m = info.minutes[S.mode], n = visList().length, pay = info.reward;
     const badge = source === 'interview' ? '<span class="badge">Interview</span>' : '';
     app.oninput = null;
     if (S.who === 'resident') {
@@ -297,7 +298,7 @@
         <ul class="tight">
           <li>Anonymous: we don't ask your name.</li>
           <li>Your answers are never shared with your hostel owner.</li>
-          ${pay ? `<li>Your UPI ID or number is used only to send the ₹${pay}, and then deleted.</li><li>One payment per person.</li>` : ''}
+          ${pay ? '<li>One payment per person.</li>' : ''}
         </ul>
         <p style="margin-bottom:8px"><b>To take part, tick both:</b></p>
         <div class="opts">
@@ -347,69 +348,53 @@
     clearTimeout(timer);
     screen = 'finish'; prog.hidden = false; nav.hidden = true;
     $('pbar').style.width = '100%'; $('psec').textContent = 'All done'; $('pnum').textContent = '';
-    const n = Object.keys(collect()).length, pay = D[S.who].payout;
-    app.innerHTML = pay
-      ? `<h1>All ${n} questions done. Thank you!</h1>
-        <p>Where should we send your <b>₹${pay}</b>?</p>
-        <label for="payout">UPI ID or mobile number<input id="payout" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="80" placeholder="name@okaxis or 98480 12345" value="${esc(S.contact.payout || '')}"${S.contact.nopay ? ' disabled' : ''}></label>
-        <p class="qhint" style="margin:6px 0 12px">We send it by UPI within a few days. One payment per person.</p>
-        <button type="button" class="opt multi" id="nopay" aria-pressed="${!!S.contact.nopay}"><span class="mk"></span><span>I don't want the ₹${pay}</span></button>
-        <div class="err" id="senderr" role="alert"></div>
-        <div class="stack"><button type="button" id="send">Send my answers</button><button type="button" class="ghost" id="fback">Back to the questions</button></div>`
-      : `<h1>That's everything. Thank you!</h1>
-        <p>You answered ${n} question${n === 1 ? '' : 's'}. Tap <b>Send</b> to save your answers.</p>
-        <div class="err" id="senderr" role="alert"></div>
-        <div class="stack"><button type="button" id="send">Send my answers</button><button type="button" class="ghost" id="fback">Back to the questions</button></div>`;
-    app.oninput = e => { if (e.target.id === 'payout') { S.contact.payout = e.target.value; save(); } };
+    const n = Object.keys(collect()).length, all = D[S.who].required;
+    app.innerHTML = `<h1>${all ? `All ${n} questions done.` : "That's everything."} Thank you!</h1>
+      <p>${all ? '' : `You answered ${n} question${n === 1 ? '' : 's'}. `}Tap <b>Send</b> to save your answers.</p>
+      <div class="err" id="senderr" role="alert"></div>
+      <div class="stack"><button type="button" id="send">Send my answers</button><button type="button" class="ghost" id="fback">Back to the questions</button></div>`;
+    app.oninput = null;
     app.onclick = e => {
       const b = e.target.closest('button'); if (!b || b.disabled) return;
-      if (b.id === 'nopay') { S.contact.nopay = !S.contact.nopay; save(); renderFinish(); }
-      else if (b.id === 'send') send(b);
+      if (b.id === 'send') send(b);
       else if (b.id === 'fback') goBack();
     };
     window.scrollTo(0, 0);
   }
 
   async function send(b) {
-    const err = $('senderr'), pay = D[S.who].payout;
+    const err = $('senderr');
     err.textContent = '';
-    let contact = null, payout = '';
-    if (pay) {
-      if (!S.contact.nopay) {
-        payout = (S.contact.payout || '').replace(/\s/g, '');
-        if (!UPI.test(payout) && !MOBILE.test(payout)) { err.textContent = 'Enter a UPI ID (like name@okaxis) or a 10-digit mobile number.'; return; }
-        contact = { payout, payment: true };
-      }
-    } else contact = ownerContact();
     b.disabled = true; b.textContent = 'Sending…';
     const payload = {
-      survey: S.who, version: S.mode, consent: 'yes', answers: collect(), contact,
+      survey: S.who, version: S.mode, consent: 'yes', answers: collect(), contact: S.who === 'owner' ? ownerContact() : null,
       source, channel, lang: 'en', questions_version: D.version,
       seconds: Math.max(0, Math.round((Date.now() - (S.started || Date.now())) / 1000))
     };
     try {
-      const { error } = await client().rpc('submit_survey', { p: payload });
+      const { data, error } = await client().rpc('submit_survey', { p: payload });
       if (error) throw error;
       LS.del(KEY(S.who));
-      renderThanks(payout);
+      renderThanks(data);
     } catch (e) {
       const m = (e && e.message) || String(e);
-      err.textContent = /payout_used/.test(m) ? 'This UPI ID or number has already been used for this survey. We pay once per person.'
-        : /bad_payout/.test(m) ? 'Enter a UPI ID (like name@okaxis) or a 10-digit mobile number.'
-        : /incomplete/.test(m) ? 'Please answer every question first.'
-        : /busy/.test(m) ? 'Lots of people are answering right now. Please tap Send again in a minute.'
+      err.textContent = /busy/.test(m) ? 'Lots of people are answering right now. Please tap Send again in a minute.'
         : /fetch|network|load failed/i.test(m) ? "Couldn't send. Check your internet and tap Send again. Your answers are kept on this phone."
         : 'Something went wrong. Please tap Send again. (' + m + ')';
       b.disabled = false; b.textContent = 'Send my answers';
     }
   }
 
-  function renderThanks(payout) {
+  // the first 6 characters of the saved survey's id: shown to the person, and checked on the results page
+  const codeOf = id => String(id || '').replace(/-/g, '').slice(0, 6).toUpperCase();
+  const codeBox = (code, label) => `<div class="codebox"><span>${label}</span><b id="code">${esc(code)}</b></div>`;
+
+  function renderThanks(id) {
     screen = 'thanks'; prog.hidden = true; nav.hidden = true;
-    const who = S.who, mode = S.mode, pay = D[who].payout;
-    if (who === 'resident' && source !== 'interview') LS.set(DONE(who), new Date().toISOString());
+    const who = S.who, mode = S.mode, reward = D[who].reward, code = codeOf(id);
+    if (who === 'resident' && source !== 'interview') LS.set(DONE(who), { at: new Date().toISOString(), code });
     app.innerHTML = '<div class="ok" id="done">Thank you! Your answers have been saved.</div>' +
-      (pay && payout ? `<p id="paynote">We'll send <b>₹${pay}</b> to <b>${esc(payout)}</b> within a few days.</p>` : '') +
+      (reward && code ? codeBox(code, 'Completion code') + `<p id="paynote">Show this screen to collect your <b>₹${reward}</b>.</p>` : '') +
       contactLine() +
       (source === 'interview' ? '<button type="button" class="big" id="nextint">Start the next one</button>' : '');
     app.oninput = null;

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Hostel &amp; PG stay survey · Hyderabad</title>
+<meta name="description" content="Tell us about your hostel or PG in Hyderabad. 25 quick questions, about 5 minutes. Get ₹25 by UPI when you finish.">
+<meta property="og:title" content="Hostel &amp; PG stay survey">
+<meta property="og:description" content="25 quick questions about your hostel or PG in Hyderabad. About 5 minutes. Get ₹25 by UPI when you finish.">
+<meta name="theme-color" content="#2f4bd8">
+<link rel="stylesheet" href="site.css">
+<link rel="stylesheet" href="survey.css">
+</head>
+<body class="sv">
+<header><div class="in"><span class="brand"><i aria-hidden="true">✓</i>Hostel &amp; PG survey</span></div></header>
+<div class="progress" id="progress" hidden><div class="bar"><i id="pbar"></i></div><div class="meta"><b id="psec"></b><span id="pnum"></span></div></div>
+<main id="app"><p class="muted">Loading the survey…</p></main>
+<div class="navbar" id="nav" hidden><div class="in"><button class="ghost" id="back" type="button">Back</button><button id="next" type="button">Next</button></div></div>
+<noscript><main><p>Please turn on JavaScript to take the survey.</p></main></noscript>
+<script src="vendor/supabase.js"></script>
+<script src="survey-config.js"></script>
+<script src="survey-questions.js"></script>
+<script src="survey.js"></script>
+</body>
+</html>
